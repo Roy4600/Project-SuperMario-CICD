@@ -21,7 +21,11 @@ CloudWatchFullAccess
    ![instance](https://github.com/abhipraydhoble/Project-Super-Mario/assets/122669982/5fe51373-eaac-4f7c-9669-34c578277051)
    
   - Attach IAM to an Instance
+![image](https://github.com/user-attachments/assets/c23f9d00-505d-4a0d-b07d-c6b21d419748)
 
+![role-ec2](https://github.com/abhipraydhoble/Project-Super-Mario/assets/122669982/70cc0ebb-6063-4c4b-98df-7259a08749b8)
+
+![modify-role](https://github.com/abhipraydhoble/Project-Super-Mario/assets/122669982/3e998e21-3654-43b0-8df0-496f009ef0a6)
 ---
 
 ### Connect to EC2-Instance
@@ -158,4 +162,146 @@ echo "terraform version"
 
 ---
 
-### 
+````
+#!/bin/bash
+set -e
+
+echo "🚀 Updating..."
+sudo apt update -y && sudo apt install -y fontconfig openjdk-21-jre unzip curl
+
+# ---------------- Jenkins ----------------
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key | sudo tee /etc/apt/keyrings/jenkins-keyring.asc > /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+
+sudo apt update -y && sudo apt install -y jenkins
+sudo systemctl enable jenkins && sudo systemctl start jenkins
+
+# ---------------- Terraform ----------------
+curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo $VERSION_CODENAME) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null
+
+sudo apt update -y && sudo apt install -y terraform
+
+# ---------------- kubectl ----------------
+curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+sudo install -m 0755 kubectl /usr/local/bin/kubectl && rm kubectl
+
+# ---------------- AWS CLI ----------------
+curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+unzip -q awscliv2.zip && sudo ./aws/install --update
+rm -rf aws awscliv2.zip
+
+# ---------------- Final ----------------
+echo "✅ Done!"
+echo "Jenkins: http://<IP>:8080"
+echo "Password: sudo cat /var/lib/jenkins/secrets/initialAdminPassword"
+````
+---
+
+### Install Required Plugins and Configure them in tools
+
+````
+AWS Credentials Plugin
+Terraform 
+Stage view 
+````
+
+### Add aws credentials in ManageJenkins-->Credentils
+
+
+---
+### Jenkins Pipeline
+````
+pipeline {
+    agent any
+
+    parameters {
+        choice(
+            name: 'ACTION',
+            choices: ['apply', 'destroy'],
+            description: 'Choose Terraform action'
+        )
+    }
+
+    environment {
+        AWS_DEFAULT_REGION = "ap-southeast-1"
+        CLUSTER_NAME = "EKS_CLOUD"
+    }
+
+    stages {
+
+        stage('Clone Repo') {
+            steps {
+                git branch: 'main', url: 'https://github.com/abhipraydhoble/Project-SuperMario-CICD.git'
+            }
+        }
+
+        stage('Terraform Init') {
+            steps {
+                dir('EKS-TF') {
+                    sh 'terraform init'
+                }
+            }
+        }
+
+        stage('Terraform Apply') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                dir('EKS-TF') {
+                    sh 'terraform apply -auto-approve'
+                }
+            }
+        }
+
+        stage('Update kubeconfig') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                sh '''
+                aws eks --region $AWS_DEFAULT_REGION \
+                update-kubeconfig --name $CLUSTER_NAME 
+                '''
+            }
+        }
+
+        stage('Verify Cluster') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                sh 'kubectl get nodes'
+            }
+        }
+
+        stage('Deploy to EKS') {
+            when {
+                expression { params.ACTION == 'apply' }
+            }
+            steps {
+                sh '''
+                kubectl apply -f deployment.yaml
+                kubectl apply -f service.yaml
+                '''
+            }
+        }
+
+        stage('Terraform Destroy') {
+            when {
+                expression { params.ACTION == 'destroy' }
+            }
+            steps {
+                input message: "Are you sure you want to DESTROY infrastructure?"
+                dir('EKS-TF') {
+                    sh 'terraform destroy -auto-approve'
+                }
+            }
+        }
+    }
+}
+````
+
+
