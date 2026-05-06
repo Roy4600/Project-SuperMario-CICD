@@ -36,138 +36,10 @@ CloudWatchFullAccess
 ### Script file to install Jenkins & Terraform (Give execute  permission and install)
 ````
 #!/bin/bash
-
-set -e  # exit on error
-
-echo "🚀 Updating system..."
-sudo apt update -y
-
-# -------------------------------
-# Java + Jenkins Installation
-# -------------------------------
-
-echo "☕ Installing Java (required for Jenkins)..."
-sudo apt install -y fontconfig openjdk-21-jre
-java -version
-
-echo "🔐 Adding Jenkins repository key..."
-sudo mkdir -p /etc/apt/keyrings
-sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc \
-  https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
-
-echo "📦 Adding Jenkins repository..."
-echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc]" \
-  https://pkg.jenkins.io/debian-stable binary/ | \
-  sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-
-echo "🔄 Updating package list..."
-sudo apt update -y
-
-echo "⚙️ Installing Jenkins..."
-sudo apt install -y jenkins
-
-echo "▶️ Starting and enabling Jenkins..."
-sudo systemctl enable jenkins
-sudo systemctl start jenkins
-
-echo "📊 Jenkins status:"
-sudo systemctl status jenkins --no-pager
-
-# -------------------------------
-# Terraform Installation
-# -------------------------------
-
-echo "🔐 Adding HashiCorp GPG key..."
-wget -O - https://apt.releases.hashicorp.com/gpg | \
-sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-
-echo "📦 Adding Terraform repository..."
-echo "deb [arch=$(dpkg --print-architecture) \
-signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] \
-https://apt.releases.hashicorp.com \
-$(grep -oP '(?<=UBUNTU_CODENAME=).*' /etc/os-release || lsb_release -cs) main" | \
-sudo tee /etc/apt/sources.list.d/hashicorp.list
-
-echo "🔄 Updating package list..."
-sudo apt update -y
-
-echo "🌍 Installing Terraform..."
-sudo apt install -y terraform
-
-echo "📦 Terraform version:"
-terraform -version
-
-# -------------------------------
-# kubectl Installation
-# -------------------------------
-
-echo "☸️ Installing kubectl..."
-
-curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-rm -f kubectl
-
-echo "🔍 kubectl version:"
-kubectl version --client
-
-# -------------------------------
-# AWS CLI v2 Installation
-# -------------------------------
-
-echo "🌍 Installing AWS CLI v2..."
-
-sudo apt install -y unzip
-
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-
-unzip -o awscliv2.zip
-
-sudo ./aws/install --update
-
-rm -rf aws awscliv2.zip
-
-echo "📦 AWS CLI version:"
-aws --version
-
-# -------------------------------
-# Jenkins Permissions Fix
-# -------------------------------
-
-echo "🔧 Fixing Jenkins permissions..."
-
-sudo usermod -aG sudo jenkins || true
-sudo usermod -aG docker jenkins || true
-
-sudo systemctl restart jenkins
-
-# -------------------------------
-# Final Info
-# -------------------------------
-
-echo "✅ Setup Complete!"
-
-echo "👉 Access Jenkins at:"
-echo "http://<your-server-ip>:8080"
-
-echo "🔑 Get initial admin password:"
-echo "sudo cat /var/lib/jenkins/secrets/initialAdminPassword"
-
-echo "🧪 Verify setup:"
-echo "aws sts get-caller-identity"
-echo "kubectl version --client"
-echo "terraform version"
-````
-
----
-
-````
-#!/bin/bash
 set -e
 
 echo "🚀 Updating..."
-sudo apt update -y && sudo apt install -y fontconfig openjdk-21-jre unzip curl
+sudo apt update -y && sudo apt install -y fontconfig openjdk-21-jre unzip curl snapd
 
 # ---------------- Jenkins ----------------
 sudo mkdir -p /etc/apt/keyrings
@@ -178,10 +50,7 @@ sudo apt update -y && sudo apt install -y jenkins
 sudo systemctl enable jenkins && sudo systemctl start jenkins
 
 # ---------------- Terraform ----------------
-curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(. /etc/os-release && echo $VERSION_CODENAME) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list > /dev/null
-
-sudo apt update -y && sudo apt install -y terraform
+sudo snap install terraform --classic
 
 # ---------------- kubectl ----------------
 curl -LO "https://dl.k8s.io/release/$(curl -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
@@ -192,11 +61,8 @@ curl -s "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.z
 unzip -q awscliv2.zip && sudo ./aws/install --update
 rm -rf aws awscliv2.zip
 
-# ---------------- Final ----------------
-echo "✅ Done!"
-echo "Jenkins: http://<IP>:8080"
-echo "Password: sudo cat /var/lib/jenkins/secrets/initialAdminPassword"
 ````
+
 ---
 
 ### Install Required Plugins and Configure them in tools
@@ -311,4 +177,23 @@ pipeline {
 }
 ````
 
+### set permissions for cluster access
+- Just change **NEW_USER_NAME** )iam user name) at the top to your new user, paste it into your terminal, and press Enter
+````
+NEW_USER="NEW_USER_NAME" && \
+ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text) && \
+aws eks create-access-entry --cluster-name EKS_CLOUD --region ap-southeast-1 --principal-arn arn:aws:iam::$ACCOUNT_ID:user/$NEW_USER --type STANDARD && \
+aws eks associate-access-policy --cluster-name EKS_CLOUD --region ap-southeast-1 --principal-arn arn:aws:iam::$ACCOUNT_ID:user/$NEW_USER --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy --access-scope type=cluster
+````
 
+###  login into clutser
+````
+aws eks update-kubeconfig --name EKS_CLOUD --region ap-southeast-1
+````
+
+### access app
+````
+kubectl get nodes
+kubectl get pods
+kubectl get svc 
+````
